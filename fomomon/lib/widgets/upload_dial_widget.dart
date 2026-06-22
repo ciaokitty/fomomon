@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../services/upload_service.dart';
 import '../services/local_session_storage.dart';
+import '../services/local_site_storage.dart';
 import '../services/site_sync_service.dart';
 import '../models/site.dart';
 import '../exceptions/auth_exceptions.dart';
@@ -43,6 +44,7 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
 
   /// After all session uploads, while syncing sites.json and telemetry.
   bool _isSyncingMetadata = false;
+  bool _hasPendingMetadataSync = false;
 
   // Number of phases per session (matches UploadService.numPhasesPerSession)
   static const int numPhasesPerSession = 3;
@@ -89,11 +91,45 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
 
   Future<void> _loadSessions() async {
     final sessions = await LocalSessionStorage.loadAllSessions();
+    final localSites = await LocalSiteStorage.loadLocalSites();
     final unuploaded = sessions.where((s) => !s.isUploaded).toList();
+    final uploadedSessions = sessions.where((s) => s.isUploaded).toList();
+    final uploadedWithImageUrls =
+        uploadedSessions.where((session) {
+          return !session.isDeleted &&
+              (session.portraitImageUrl?.isNotEmpty ?? false) &&
+              (session.landscapeImageUrl?.isNotEmpty ?? false);
+        }).toList();
+    // final uploadedWithAnyImageUrls =
+    //     uploadedSessions.where((session) {
+    //       return (session.portraitImageUrl?.isNotEmpty ?? false) &&
+    //           (session.landscapeImageUrl?.isNotEmpty ?? false);
+    //     }).length;
+    // final deletedSessions = sessions.where((s) => s.isDeleted).length;
+    final hasPendingMetadataSync =
+        unuploaded.isEmpty &&
+        localSites.isNotEmpty &&
+        uploadedWithImageUrls.isNotEmpty;
 
+    // dLog(
+    //   'upload_dial_widget: _loadSessions loaded '
+    //   '${sessions.length} total, ${unuploaded.length} unuploaded, '
+    //   '${uploadedSessions.length} uploaded '
+    //   '(${uploadedWithImageUrls.length} non-deleted with image URLs, '
+    //   '${uploadedSessions.length - uploadedWithAnyImageUrls} missing image URLs), '
+    //   '$deletedSessions deleted, ${localSites.length} local site(s), '
+    //   'pendingMetadataSync=$hasPendingMetadataSync; previous dial state '
+    //   'uploaded=$uploaded total=$total hasError=$hasError '
+    //   'pendingMetadataSync=$_hasPendingMetadataSync '
+    //   'isUploading=$_isUploading isSyncingMetadata=$_isSyncingMetadata '
+    //   'errorMessage=$_errorMessage lastError=$_lastErrorLabel',
+    // );
+
+    if (!mounted) return;
     setState(() {
       uploaded = 0;
       total = unuploaded.length;
+      _hasPendingMetadataSync = hasPendingMetadataSync;
     });
   }
 
@@ -116,6 +152,15 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
   }
 
   void _onUploadPressed() async {
+    // dLog(
+    //   'upload_dial_widget: upload pressed with state '
+    //   'uploaded=$uploaded total=$total hasError=$hasError '
+    //   'isUploading=$_isUploading noNetwork=$_noNetwork '
+    //   'pendingMetadataSync=$_hasPendingMetadataSync '
+    //   'isSyncingMetadata=$_isSyncingMetadata '
+    //   'errorMessage=$_errorMessage lastError=$_lastErrorLabel',
+    // );
+
     // Show immediate tap feedback
     setState(() {
       _isPressed = true;
@@ -132,11 +177,20 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
     // Always refresh sessions first so `total` reflects the current number
     // of unuploaded sessions before we decide whether there is any work to do.
     await _loadSessions();
+    if (!mounted) return;
 
-    // Early return if still no sessions after refresh
-    if (total == 0) {
+    if (total == 0 && !_hasPendingMetadataSync) {
+      dLog(
+        'upload_dial_widget: upload press returning early because '
+        '_loadSessions set total=0 and no metadata sync is pending; '
+        'hasError=$hasError '
+        'errorMessage=$_errorMessage lastError=$_lastErrorLabel '
+        'noNetwork=$_noNetwork isSyncingMetadata=$_isSyncingMetadata',
+      );
       return;
     }
+
+    final isMetadataOnlyRetry = total == 0 && _hasPendingMetadataSync;
 
     // Quick visual feedback on tap
     setState(() {
@@ -148,11 +202,18 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
       _currentSessionLabel = null;
       _lastErrorLabel = null;
       _errorMessage = null;
-      _isSyncingMetadata = false;
+      _isSyncingMetadata = isMetadataOnlyRetry;
     });
+    dLog(
+      isMetadataOnlyRetry
+          ? 'upload_dial_widget: starting metadata-only sync retry'
+          : 'upload_dial_widget: starting upload workflow for $total '
+              'unuploaded session(s)',
+    );
 
     // Network check before starting upload
     final hasNetwork = await _checkNetwork();
+    if (!mounted) return;
     if (!hasNetwork) {
       setState(() {
         _isUploading = false;
@@ -160,6 +221,20 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
         _noNetwork = true;
         hasError = true;
       });
+      return;
+    }
+
+    if (isMetadataOnlyRetry) {
+      try {
+        await _syncMetadataAndRefresh(reason: 'metadata-only retry');
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isUploading = false;
+            _isSyncingMetadata = false;
+          });
+        }
+      }
       return;
     }
 
@@ -213,20 +288,13 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
         }
       }
 
-      // --- Step 2: sync (always runs unless auth exception) ---
-      if (mounted) {
-        setState(() => _isSyncingMetadata = true);
-      }
-      final syncResult = await SiteSyncService.syncSitesToRemote();
-      if (mounted && !syncResult.isSuccess) {
-        setState(() {
-          hasError = true;
-          _errorMessage = syncResult.message;
-        });
-      }
-
-      // --- Step 3: refresh dial ---
-      await _loadSessions();
+      await _syncMetadataAndRefresh(reason: 'post-upload sync');
+      dLog(
+        'upload_dial_widget: post-workflow refresh complete with '
+        'uploaded=$uploaded total=$total hasError=$hasError '
+        'pendingMetadataSync=$_hasPendingMetadataSync '
+        'errorMessage=$_errorMessage lastError=$_lastErrorLabel',
+      );
       if (mounted) {
         setState(() {
           _isUploading = false;
@@ -285,12 +353,52 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
     }
   }
 
+  Future<void> _syncMetadataAndRefresh({required String reason}) async {
+    if (mounted) {
+      setState(() => _isSyncingMetadata = true);
+    }
+    dLog(
+      'upload_dial_widget: starting SiteSyncService.syncSitesToRemote() '
+      'for $reason',
+    );
+    final syncResult = await SiteSyncService.syncSitesToRemote();
+    dLog(
+      'upload_dial_widget: sync result for $reason '
+      'status=${syncResult.status} isSuccess=${syncResult.isSuccess} '
+      'message=${syncResult.message}',
+    );
+
+    if (mounted) {
+      setState(() {
+        if (syncResult.isSuccess) {
+          hasError = false;
+          _noNetwork = false;
+          _errorMessage = null;
+          _lastErrorLabel = null;
+        } else {
+          hasError = true;
+          _errorMessage = syncResult.message;
+          _lastErrorLabel = syncResult.status.toString();
+        }
+      });
+    }
+
+    await _loadSessions();
+  }
+
   @override
   Widget build(BuildContext context) {
     final label = total == 0 ? '0/0 files' : '$uploaded/$total';
+    final hasMetadataOnlyPending = total == 0 && _hasPendingMetadataSync;
     final buttonText =
         _noNetwork
             ? 'No Network'
+            : _isSyncingMetadata
+            ? 'Syncing Metadata...'
+            : hasMetadataOnlyPending && hasError
+            ? 'Retry Metadata'
+            : hasMetadataOnlyPending
+            ? 'Sync Metadata'
             : hasError
             ? 'Tap to Retry'
             : _isUploading
@@ -324,7 +432,11 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
 
     // Show success message when all sessions uploaded
     final allUploaded =
-        total == 0 && uploaded == 0 && !hasError && !_isUploading;
+        total == 0 &&
+        uploaded == 0 &&
+        !hasError &&
+        !_isUploading &&
+        !_hasPendingMetadataSync;
 
     return GestureDetector(
       onTap: _isUploading ? null : _onUploadPressed,
@@ -419,6 +531,19 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
                 textAlign: TextAlign.center,
               ),
             ],
+            if (hasMetadataOnlyPending && !hasError) ...[
+              const SizedBox(height: 4),
+              Text(
+                _isSyncingMetadata ? phaseLabel : 'Metadata sync pending',
+                style: TextStyle(
+                  color:
+                      _isSyncingMetadata ? Colors.white70 : Colors.yellowAccent,
+                  fontSize: 9,
+                  fontFamily: 'monospace',
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
             // Show error message on failure (but not the raw error string)
             if (hasError && !allUploaded) ...[
               const SizedBox(height: 4),
@@ -433,7 +558,8 @@ class _UploadDialWidgetState extends State<UploadDialWidget>
                 ),
               ),
             ],
-            if (total > 0 || allUploaded) const SizedBox(height: 4),
+            if (total > 0 || allUploaded || hasMetadataOnlyPending)
+              const SizedBox(height: 4),
             Text(
               buttonText,
               style: TextStyle(
