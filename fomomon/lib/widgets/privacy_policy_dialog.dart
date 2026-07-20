@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:http/http.dart' as http;
 
 class PrivacyPolicyDialog extends StatefulWidget {
@@ -69,9 +70,26 @@ class _PrivacyPolicyDialogState extends State<PrivacyPolicyDialog> {
             const Divider(),
             Expanded(
               child: SingleChildScrollView(
-                child: SelectableText(
-                  _privacyPolicyText,
-                  style: const TextStyle(fontSize: 14),
+                child: MarkdownBody(
+                  data: _privacyPolicyText,
+                  selectable: true,
+                  styleSheet: MarkdownStyleSheet.fromTheme(
+                    Theme.of(context),
+                  ).copyWith(
+                    p: const TextStyle(fontSize: 14),
+                    h1: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    h2: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    h3: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
