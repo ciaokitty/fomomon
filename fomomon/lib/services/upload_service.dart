@@ -1,17 +1,10 @@
-/// upload_service.dart
-/// -------------------
-/// Handles uploading files and JSON to a S3 bucket. Responsibilities:
-/// 1. Map sessions -> S3 bucket paths, eg:
-///   bucketRoot + siteId/userId_timestamp_portrait.jpg
-/// 2. Handle auth/cognito token
-/// 3. Handle retries, rate limiting, etc.
+/// Uploads session files and JSON documents to S3.
 ///
-/// Upload flow for a session:
-/// 1. Upload portrait -> get URL
-/// 2. Upload landscape -> get URL
-/// 3. Upload session JSON
-/// 4. Mark session uploaded
-/// 5. Call onProgress() callback
+/// The service maps captured sessions to S3 object keys, obtains temporary AWS
+/// credentials through Cognito, and uploads images and JSON with presigned S3
+/// PUT URLs. In guest mode only, uploads are sent to a public bucket through
+/// explicit unauthenticated code paths.
+library;
 
 import 'dart:convert';
 
@@ -38,6 +31,24 @@ enum UploadPhase { portrait, landscape, sessionJson }
 /// Update this if phases are added/removed in the future.
 const int numPhasesPerSession = 3;
 
+/// Indicates that a conditional S3 write failed because the remote object changed.
+class ConditionalWriteConflictException implements Exception {
+  /// Creates a conditional write conflict for [s3Key].
+  const ConditionalWriteConflictException({required this.s3Key, this.etag});
+
+  /// The S3 object key that rejected the conditional write.
+  final String s3Key;
+
+  /// The ETag used in the failed `If-Match` request.
+  final String? etag;
+
+  @override
+  String toString() {
+    return 'ConditionalWriteConflictException(s3Key: $s3Key, etag: $etag)';
+  }
+}
+
+/// Uploads captured session artifacts to S3.
 class UploadService {
   // UploadService is a singleton
   UploadService._privateConstructor();
@@ -47,11 +58,15 @@ class UploadService {
   final S3SignerService _s3SignerService = S3SignerService.instance;
   String get _region => AppConfig.region;
 
-  // Upload all un-uploaded sessions to the bucketRoot of the matching site.
-  //
-  // @param onProgress: callback to update the UI with progress
-  // @param sites: the sites.json object parsed into a list of Site objects
-  // @throws: Exception if the upload fails.
+  /// Uploads every un-uploaded session in [sites] order.
+  ///
+  /// The [sites] argument provides the canonical site metadata used to derive
+  /// bucket roots and object keys. The [onProgress], [onPhaseProgress], and
+  /// [onSessionError] callbacks are optional UI hooks.
+  ///
+  /// Returns when all sessions and telemetry flushes have completed.
+  ///
+  /// Throws an [Exception] if one or more sessions failed to upload.
   Future<void> uploadAllSessions({
     required List<Site> sites,
     required VoidCallback? onProgress,
@@ -124,7 +139,14 @@ class UploadService {
     }
   }
 
-  // Upload a single session to the bucketRoot of the matching site.
+  /// Uploads a single [session] using metadata from [sites].
+  ///
+  /// The [onPhaseProgress] callback, when provided, is invoked after each
+  /// portrait, landscape, and session-JSON upload phase.
+  ///
+  /// Returns the uploaded session JSON URL.
+  ///
+  /// Throws an [Exception] if any phase fails.
   Future<String> _uploadSession(
     CapturedSession session,
     List<Site> sites,
@@ -167,7 +189,7 @@ class UploadService {
     session.portraitImageUrl = portraitUrl;
     session.landscapeImageUrl = landscapeUrl;
 
-    final sessionJsonPath = 'sessions/${session.userId}_${timestampStr}.json';
+    final sessionJsonPath = 'sessions/${session.userId}_$timestampStr.json';
     final sessionUrl = await uploadJson(
       session.toJson(),
       site.bucketRoot,
@@ -180,6 +202,15 @@ class UploadService {
     return sessionUrl;
   }
 
+  /// Uploads the local file at [localPath] to [bucketRoot]/[remotePath].
+  ///
+  /// In guest mode, the file is uploaded through the explicit unauthenticated
+  /// code path. In authenticated mode, the upload always uses Cognito-backed
+  /// credentials and never falls back to an unauthenticated write.
+  ///
+  /// Returns the final non-presigned object URL.
+  ///
+  /// Throws an [Exception] if validation, signing, or upload fails.
   Future<String> uploadFile(
     String localPath,
     String bucketRoot,
@@ -196,132 +227,141 @@ class UploadService {
     final fullUrl = _joinUrls(cleanRoot, remotePath);
     dLog("upload_service: constructed fullUrl: $fullUrl");
 
-    // Always try auth path unless in guest mode.
-    // This ensures that if token is missing/expired, getValidToken() will throw
-    // AuthSessionExpiredException, which bubbles up to trigger login redirect.
-    // Guest mode always uses no-auth path to public bucket.
     if (AppConfig.isGuestMode) {
       return await _uploadFileNoAuth(localPath, fullUrl);
     }
     return await _uploadFileAuth(localPath, fullUrl);
   }
 
+  /// Uploads [localPath] to [fullUrl] with authenticated S3 access.
+  ///
+  /// Returns the final non-presigned object URL.
+  ///
+  /// Throws an [AuthSessionExpiredException], [AuthCredentialsException], or
+  /// other [Exception] if signing or upload fails.
   Future<String> _uploadFileAuth(String localPath, String fullUrl) async {
-    try {
-      // Get temporary AWS credentials from AuthService
-      // Note: If AuthSessionExpiredException is thrown, we want it to bubble up
-      // to uploadDialWidget so user can be redirected to login. Don't catch it
-      // here.
-      final credentials = await authService.getUploadCredentials();
+    final credentials = await authService.getUploadCredentials();
+    final parsed = _parseS3Url(fullUrl);
+    final bucket = parsed['bucket']!;
+    final key = parsed['key']!;
+    final bytes = await readFileBytes(localPath);
+    final contentType = _getContentType(localPath);
 
-      // Parse bucket and key from the full URL
-      final parsed = _parseS3Url(fullUrl);
-      final bucket = parsed['bucket']!;
-      final key = parsed['key']!;
+    final presignedUrl = await _s3SignerService.createPresignedPutUrl(
+      bucketName: bucket,
+      s3Key: key,
+      credentials: credentials,
+      contentType: contentType,
+    );
 
-      // Read the file
-      final bytes = await readFileBytes(localPath);
-      final contentType = _getContentType(localPath);
+    dLog("upload_service: uploading authenticated file to presigned URL");
+    final response = await http.put(
+      Uri.parse(presignedUrl),
+      headers: {'Content-Type': contentType},
+      body: bytes,
+    );
 
-      // Create presigned PUT URL
-      final presignedUrl = await _s3SignerService.createPresignedPutUrl(
-        bucketName: bucket,
-        s3Key: key,
-        credentials: credentials,
-        contentType: contentType,
+    if (response.statusCode == 200) {
+      dLog(
+        'upload_service: Successfully uploaded $localPath using presigned URL',
       );
-
-      // Upload file using presigned URL
-      dLog("upload_service: uploading to presigned URL");
-      final response = await http.put(
-        Uri.parse(presignedUrl),
-        headers: {'Content-Type': contentType},
-        body: bytes,
-      );
-
-      if (response.statusCode == 200) {
-        dLog(
-          'upload_service: Successfully uploaded $localPath using presigned URL',
-        );
-        return fullUrl; // Return the normal (non-signed) URL
-      } else {
-        dLog(
-          'upload_service: Upload failed with status ${response.statusCode}',
-        );
-        dLog('upload_service: Response body: ${response.body}');
-        dLog('upload_service: Response headers: ${response.headers}');
-        throw Exception('File upload failed: ${response.statusCode}');
-      }
-      // Specifically catch the AuthExceptions thrown by getUploadCredentials()
-      // so we can redirect the user to the login screen.
-    } on AuthSessionExpiredException {
-      rethrow;
-    } on AuthCredentialsException {
-      rethrow;
-    } catch (e) {
-      dLog("upload_service: failed auth file upload $e");
-      // Fallback to no-auth upload only for non-auth errors (network, etc.)
-      return await _uploadFileNoAuth(localPath, fullUrl);
+      return fullUrl;
     }
+
+    dLog('upload_service: Upload failed with status ${response.statusCode}');
+    dLog('upload_service: Response body: ${response.body}');
+    dLog('upload_service: Response headers: ${response.headers}');
+    throw Exception('File upload failed: ${response.statusCode}');
   }
 
+  /// Uploads [jsonData] to [bucketRoot]/[remotePath].
+  ///
+  /// When [ifMatch] is provided, the remote object is updated only if its ETag
+  /// still matches [ifMatch]. In guest mode, conditional writes are rejected
+  /// because guest uploads are intentionally unauthenticated and best effort.
+  ///
+  /// Returns the final non-presigned object URL.
+  ///
+  /// Throws a [ConditionalWriteConflictException] when the `If-Match`
+  /// precondition fails, or another [Exception] if signing or upload fails.
   Future<String> uploadJson(
     Map<String, dynamic> jsonData,
     String bucketRoot,
-    String remotePath,
-  ) async {
+    String remotePath, {
+    String? ifMatch,
+  }) async {
     final fullUrl = _joinUrls(bucketRoot, remotePath);
 
-    // Always try auth path unless in guest mode.
     if (AppConfig.isGuestMode) {
+      if (ifMatch != null) {
+        throw Exception(
+          'Conditional writes are not supported in guest mode for $remotePath',
+        );
+      }
       return await _uploadJsonNoAuth(jsonData, fullUrl);
     }
-    return await _uploadJsonAuth(jsonData, fullUrl);
+    return await _uploadJsonAuth(jsonData, fullUrl, ifMatch: ifMatch);
   }
 
+  /// Uploads [jsonData] to [fullUrl] with authenticated S3 access.
+  ///
+  /// When [ifMatch] is provided, the remote object is updated only if its ETag
+  /// still matches [ifMatch].
+  ///
+  /// Returns the final non-presigned object URL.
+  ///
+  /// Throws a [ConditionalWriteConflictException] when the `If-Match`
+  /// precondition fails, or another [Exception] if signing or upload fails.
   Future<String> _uploadJsonAuth(
     Map<String, dynamic> jsonData,
-    String fullUrl,
-  ) async {
-    try {
-      final credentials = await authService.getUploadCredentials();
+    String fullUrl, {
+    String? ifMatch,
+  }) async {
+    final credentials = await authService.getUploadCredentials();
+    final parsed = _parseS3Url(fullUrl);
+    final bucket = parsed['bucket']!;
+    final key = parsed['key']!;
 
-      final parsed = _parseS3Url(fullUrl);
-      final bucket = parsed['bucket']!;
-      final key = parsed['key']!;
+    final jsonString = jsonEncode(jsonData);
+    final jsonBytes = const Utf8Codec().encode(jsonString);
+    final signedHeaders =
+        ifMatch == null ? const <String, String>{} : {'if-match': ifMatch};
 
-      final jsonString = jsonEncode(jsonData);
-      final jsonBytes = const Utf8Codec().encode(jsonString);
+    final presignedUrl = await _s3SignerService.createPresignedJsonPutUrl(
+      bucketName: bucket,
+      s3Key: key,
+      credentials: credentials,
+      signedHeaders: signedHeaders,
+    );
 
-      final presignedUrl = await _s3SignerService.createPresignedJsonPutUrl(
-        bucketName: bucket,
-        s3Key: key,
-        credentials: credentials,
-      );
+    final response = await http.put(
+      Uri.parse(presignedUrl),
+      headers: {
+        'Content-Type': 'application/json',
+        if (ifMatch != null) 'If-Match': ifMatch,
+      },
+      body: jsonBytes,
+    );
 
-      final response = await http.put(
-        Uri.parse(presignedUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonBytes,
-      );
-
-      if (response.statusCode == 200) {
-        dLog('upload_service: Successfully uploaded JSON using presigned URL');
-        return fullUrl;
-      } else {
-        throw Exception('JSON upload failed: ${response.statusCode}');
-      }
-    } on AuthSessionExpiredException {
-      rethrow;
-    } on AuthCredentialsException {
-      rethrow;
-    } catch (e) {
-      dLog('upload_service: Authenticated JSON upload failed: $e');
-      return await _uploadJsonNoAuth(jsonData, fullUrl);
+    if (response.statusCode == 200) {
+      dLog('upload_service: Successfully uploaded JSON using presigned URL');
+      return fullUrl;
     }
+
+    if (response.statusCode == 412) {
+      throw ConditionalWriteConflictException(s3Key: key, etag: ifMatch);
+    }
+
+    throw Exception('JSON upload failed: ${response.statusCode}');
   }
 
-  // Internal helper for no-auth file uploads
+  /// Uploads [localPath] to [fullUrl] without authentication.
+  ///
+  /// This code path is reserved for explicit guest-mode uploads only.
+  ///
+  /// Returns the final object URL.
+  ///
+  /// Throws an [Exception] if the upload fails.
   Future<String> _uploadFileNoAuth(String localPath, String fullUrl) async {
     dLog("upload_service: uploading NOAUTH FILE to $fullUrl");
     final bytes = await readFileBytes(localPath);
@@ -342,6 +382,13 @@ class UploadService {
     }
   }
 
+  /// Uploads [jsonData] to [fullUrl] without authentication.
+  ///
+  /// This code path is reserved for explicit guest-mode uploads only.
+  ///
+  /// Returns the final object URL.
+  ///
+  /// Throws an [Exception] if the upload fails.
   Future<String> _uploadJsonNoAuth(
     Map<String, dynamic> jsonData,
     String fullUrl,
@@ -361,6 +408,9 @@ class UploadService {
     }
   }
 
+  /// Returns the HTTP content type for [filePath].
+  ///
+  /// Returns `application/octet-stream` for unknown extensions.
   String _getContentType(String filePath) {
     final extension = filePath.split('.').last.toLowerCase();
     switch (extension) {
@@ -378,8 +428,11 @@ class UploadService {
     }
   }
 
-  /// Parse the bucket details from the full URL
-  /// Example fullUrl: https://fomomon.s3.amazonaws.com/t4gc/left_6th/file.jpg
+  /// Parses the bucket and object key from [fullUrl].
+  ///
+  /// Returns a map containing the bucket, key, and region.
+  ///
+  /// Throws a [FormatException] if [fullUrl] is not a valid URL.
   Map<String, String> _parseS3Url(String fullUrl) {
     final uri = Uri.parse(fullUrl);
     final hostParts = uri.host.split('.');
@@ -388,12 +441,16 @@ class UploadService {
     return {'bucket': bucket, 'key': key, 'region': _region};
   }
 
-  /// Removes query and fragment from a URL so stored image URLs never contain ?#
+  /// Removes query and fragment components from [url].
+  ///
+  /// Returns the normalized URL string.
   String _stripQueryAndFragment(String url) {
     return url.split('#').first.split('?').first;
   }
 
-  // Helper method to properly join URLs, handling trailing slashes
+  /// Joins [baseUrl] and [path] into a normalized URL.
+  ///
+  /// Returns the combined URL with exactly one slash at the join point.
   String _joinUrls(String baseUrl, String path) {
     final cleanBase =
         baseUrl.endsWith('/')
@@ -403,15 +460,20 @@ class UploadService {
     return '$cleanBase/$cleanPath';
   }
 
+  /// Converts [timestamp] into a filename-safe string.
+  ///
+  /// Returns the ISO timestamp with colons replaced by underscores.
   String _sanitizeTimestamp(DateTime timestamp) {
     return timestamp.toIso8601String().replaceAll(':', '_');
   }
 
+  /// Returns whether [localPath] points at an existing local file.
   bool _isValidLocalPath(String localPath) {
     if (localPath.isEmpty) return false;
     return fileExists(localPath);
   }
 
+  /// Returns whether [remotePath] is safe to use as an S3 path fragment.
   bool _isValidPath(String remotePath) {
     return remotePath.isNotEmpty && !remotePath.contains('..');
   }
