@@ -28,6 +28,23 @@ class DistanceInfoPanel extends StatefulWidget {
 }
 
 class _DistanceInfoPanelState extends State<DistanceInfoPanel> {
+  /// Shrinks a long site id by keeping the year prefix and the trailing
+  /// orientation token, replacing the middle with '…' so it stays visually
+  /// distinct at a readable font size.
+  String _middleElide(String text) {
+    final headEnd = text.indexOf('_');
+    final head = headEnd > 0
+        ? text.substring(0, headEnd + 1)
+        : text.substring(0, text.length < 6 ? text.length : 6);
+    final tailStart = text.lastIndexOf('_');
+    var tail = tailStart > headEnd
+        ? text.substring(tailStart)
+        : text.substring(text.length - (text.length < 4 ? text.length : 4));
+    if (tail.length > 6) tail = tail.substring(tail.length - 4);
+    if (text.length <= head.length + tail.length + 1) return text;
+    return '$head…$tail';
+  }
+
   @override
   void didUpdateWidget(covariant DistanceInfoPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -96,7 +113,7 @@ class _DistanceInfoPanelState extends State<DistanceInfoPanel> {
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          current.id,
+                          _middleElide(current.id),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
