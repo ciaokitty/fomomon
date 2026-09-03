@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>fomomon needs camera access to take photos of species at survey sites.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>fomomon needs microphone access to record audio with photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>fomomon uses your location to show nearby sites and guide you to them.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>fomomon uses motion data to provide device movement feedback while locating sites.</string>
 </dict>
 </plist>
