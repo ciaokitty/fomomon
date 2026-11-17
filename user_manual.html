@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FOMO User Manual</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: #18251f;
+      background: #f4f8f3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      padding: 40px 24px;
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 34px;
+    }
+
+    .hero {
+      grid-column: 1 / -1;
+      overflow: hidden;
+      position: relative;
+      border-radius: 18px;
+      color: #fff;
+      background:
+        linear-gradient(135deg, rgba(9, 43, 34, 0.96), rgba(29, 127, 80, 0.9)),
+        url("fomomon/assets/images/login_background.jpg") center / cover;
+      box-shadow: 0 18px 40px -24px rgba(4, 34, 25, 0.7);
+    }
+
+    .hero-inner {
+      padding: 34px;
+      max-width: 760px;
+    }
+
+    .kicker {
+      margin: 0 0 10px;
+      color: #ccebd8;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 620px;
+      margin: 12px 0 0;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 16px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 9px 15px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 8px;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.12);
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .button.primary {
+      border-color: #f5c34c;
+      color: #12251c;
+      background: #f5c34c;
+    }
+
+    .toc {
+      position: sticky;
+      top: 22px;
+      align-self: start;
+      padding: 18px 16px;
+      border: 1px solid #dfe9dd;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 14px 34px -28px rgba(23, 55, 38, 0.45);
+    }
+
+    .toc h2 {
+      margin: 0 0 12px;
+      color: #586b5c;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .toc a {
+      display: block;
+      padding: 8px 9px;
+      border-radius: 8px;
+      color: #263f31;
+      font-size: 14px;
+      text-decoration: none;
+    }
+
+    .toc a:hover,
+    .toc a:focus {
+      color: #11683d;
+      background: #e8f4ec;
+      outline: none;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .guide-section {
+      margin-bottom: 24px;
+      padding: 28px;
+      border: 1px solid #dfe9dd;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 16px 36px -32px rgba(14, 44, 29, 0.5);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 8px;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .num {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      color: #fff;
+      background: #147446;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .intro {
+      margin: 0 0 17px;
+      color: #506254;
+    }
+
+    .steps {
+      margin: 0 0 20px;
+      padding-left: 22px;
+    }
+
+    .steps li {
+      margin: 7px 0;
+    }
+
+    .note {
+      margin: 16px 0 0;
+      padding: 13px 14px;
+      border-left: 4px solid #2f7fd7;
+      border-radius: 8px;
+      color: #2d3d4a;
+      background: #edf5ff;
+      font-size: 14px;
+    }
+
+    .screens {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 22px;
+      margin-top: 18px;
+      align-items: start;
+    }
+
+    figure {
+      margin: 0;
+      text-align: center;
+    }
+
+    .device {
+      width: min(100%, 260px);
+      margin: 0 auto;
+      padding: 8px;
+      border-radius: 30px;
+      background: #121212;
+      box-shadow: 0 16px 38px -22px rgba(0, 0, 0, 0.65);
+    }
+
+    .device.landscape {
+      width: min(100%, 380px);
+      border-radius: 18px;
+    }
+
+    .device img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 23px;
+    }
+
+    .device.landscape img {
+      border-radius: 12px;
+    }
+
+    figcaption {
+      max-width: 300px;
+      margin: 9px auto 0;
+      color: #607166;
+      font-size: 13px;
+    }
+
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .quick-card {
+      padding: 15px;
+      border: 1px solid #dfe9dd;
+      border-radius: 10px;
+      background: #fbfdfb;
+    }
+
+    .quick-card h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+
+    .quick-card p {
+      margin: 0;
+      color: #5a6c60;
+      font-size: 14px;
+    }
+
+    footer {
+      grid-column: 1 / -1;
+      padding: 18px 0 0;
+      color: #738177;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 820px) {
+      .page {
+        grid-template-columns: 1fr;
+        padding: 22px 16px;
+      }
+
+      .hero-inner,
+      .guide-section {
+        padding: 24px;
+      }
+
+      .toc {
+        position: static;
+      }
+
+      .quick-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .page {
+        display: block;
+        width: 100%;
+        padding: 0;
+      }
+
+      .hero,
+      .guide-section {
+        box-shadow: none;
+      }
+
+      .toc,
+      .actions {
+        display: none;
+      }
+
+      .guide-section {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero-inner">
+        <h1>Photo Monitoring Application Guide</h1>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="Guide contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#login">1. Sign in</a></li>
+        <li><a href="#home">2. Home navigation</a></li>
+        <li><a href="#site">3. Select a site</a></li>
+        <li><a href="#capture">4. Capture photos</a></li>
+        <li><a href="#survey">5. Submit survey</a></li>
+        <li><a href="#uploads">6. Upload sessions</a></li>
+        <li><a href="#tips">7. Quick tips</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section class="guide-section" id="login">
+        <h2 class="section-title"><span class="num">1</span>Sign in</h2>
+        <p class="intro">Open the app and sign in with your assigned organisation account. A short loading step then prepares site data for offline use before the home screen appears.</p>
+        <ol class="steps">
+          <li>Choose your <strong>Organization</strong> from the dropdown (for example, <em>t4gc</em>).</li>
+          <li>Enter your <strong>Name</strong> and <strong>Password</strong>. Use the eye icon on the password field to show or hide the text.</li>
+          <li>Tap <strong>Continue</strong> to sign in. The app fetches authentication details and then loads site data.</li>
+        </ol>
+        <p class="note">No account? Tap <strong>Continue as Guest</strong> to skip sign-in for field testing. The <strong>Privacy Policy</strong> link at the bottom of the screen opens the full policy in a dialog.</p>
+        <div class="screens">
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_login_page.jpg" alt="Login screen with organisation dropdown, name, password, Continue and Continue as Guest buttons, and Privacy Policy link">
+            </div>
+            <figcaption>Login screen</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guide-section" id="home">
+        <h2 class="section-title"><span class="num">2</span>Home navigation</h2>
+        <p class="intro">The home screen shows your position on a radar-style map alongside nearby site markers. Follow the route advisory to walk toward a site, then start a capture session with the plus button.</p>
+        <ol class="steps">
+          <li>Read the <strong>route advisory</strong> banner near the top for turn direction and distance to the nearest site.</li>
+          <li>Use the radar panel to see your location dot and the surrounding site markers.</li>
+          <li>Check the <strong>distance panel</strong> above the bottom edge for the selected site ID and how far away it is. Use the next button to cycle through sites.</li>
+          <li>Tap the green <strong>plus</strong> button to start a capture session. If you are within range of a site, capture begins immediately; otherwise the site selection screen opens.</li>
+        </ol>
+        <p class="note">Tap the <strong>wifi / arrow</strong> button at the bottom of the screen to open the upload queue. The power icon in the top-left corner signs you out.</p>
+        <div class="screens">
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_home_navigation_page.jpg" alt="Home screen with radar panel, route advisory, distance panel, plus button, and online mode button">
+            </div>
+            <figcaption>Home screen with radar, route advisory, and capture controls</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guide-section" id="site">
+        <h2 class="section-title"><span class="num">3</span>Select a site</h2>
+        <p class="intro">This screen appears when you tap the plus button while not within range of an existing site. Pick a known site or create a new local site before capturing.</p>
+        <ol class="steps">
+          <li>Under <strong>Choose Existing Site</strong>, open the site dropdown and pick the correct site ID.</li>
+          <li>Use <strong>Create New Site</strong> only when the site is not already listed, then type a new site ID.</li>
+          <li>Tap <strong>Continue</strong> once a site is chosen or a new ID is entered. The button enables automatically.</li>
+        </ol>
+        <p class="note">New sites are saved locally using your current GPS position. Use the same site ID format as your project team so captured sessions match during upload and review.</p>
+        <div class="screens">
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_site_selection_page.jpg" alt="Site selection screen with Choose Existing Site and Create New Site cards">
+            </div>
+            <figcaption>Choose an existing site or create a new one</figcaption>
+          </figure>
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_site_selection_dropdown.jpg" alt="Site selection dropdown listing available site IDs">
+            </div>
+            <figcaption>Available site list</figcaption>
+          </figure>
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_new_.jpg" alt="Create New Site card with a new site ID typed into the Site ID field">
+            </div>
+            <figcaption>New site entry</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guide-section" id="capture">
+        <h2 class="section-title"><span class="num">4</span>Capture photos</h2>
+        <p class="intro">Each session needs a portrait photo and a landscape photo. A faint reference (ghost) image and gridlines help you frame the shot. After each capture you can review the photo before saving it.</p>
+        <ol class="steps">
+          <li>Frame the site view inside the camera preview, using the ghost image overlay and gridlines as a guide. Drag the opacity slider on the right to make the reference image more or less visible.</li>
+          <li>If the site has a reference heading, line up the orientation dial at the top so your device matches the reference direction.</li>
+          <li>Tap the shutter button to take the photo.</li>
+          <li>On the review screen, tap <strong>Use Photo</strong> to keep it, or <strong>Retake</strong> to discard and try again.</li>
+          <li>After the portrait photo is accepted, the app locks to landscape orientation and repeats the same steps for the landscape photo.</li>
+        </ol>
+        <p class="note">The flash is off by default and focus is set to auto. If the camera cannot start, check that camera permission is granted for the app.</p>
+        <div class="screens">
+          <figure>
+            <div class="device landscape">
+              <img src="app_screenshots/app_landscape_photo_capture.jpg" alt="Landscape camera preview with ghost image overlay, gridlines, site ID, and shutter button">
+            </div>
+            <figcaption>Camera preview with reference overlay</figcaption>
+          </figure>
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_potrait_photo_capture.jpg" alt="Portrait photo review screen with Retake and Use Photo buttons">
+            </div>
+            <figcaption>Photo review with Retake and Use Photo</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guide-section" id="survey">
+        <h2 class="section-title"><span class="num">5</span>Submit survey</h2>
+        <p class="intro">After both photos are accepted, complete the short survey so the field session includes the required observations. The questions shown depend on the selected site.</p>
+        <ol class="steps">
+          <li>Answer each question. Text questions have a type-in field; multiple-choice questions have a dropdown.</li>
+          <li>Leave a field blank if an observation does not apply, or fill in every question as your project requires.</li>
+          <li>Tap <strong>Submit Survey</strong> to save the photo session and survey answers together.</li>
+        </ol>
+        <p class="note">If a site has no survey questions configured, this step is skipped automatically and the session is saved right after the landscape photo is accepted.</p>
+        <div class="screens">
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_survey_form_page.jpg" alt="Survey screen with text and dropdown questions and a Submit Survey button">
+            </div>
+            <figcaption>Survey form</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guide-section" id="uploads">
+        <h2 class="section-title"><span class="num">6</span>Upload sessions</h2>
+        <p class="intro">Open the upload queue from the wifi button on the home screen. Saved sessions appear here and upload when you have a stable connection.</p>
+        <ol class="steps">
+          <li>Check the <strong>upload dial</strong> at the top for the pending file count (for example, <em>0/3</em>) and the circular progress ring.</li>
+          <li>Tap <strong>Tap to Upload</strong> to start uploading. Each session uploads in three phases, shown as the P / L / S dots under the dial: Portrait, Landscape, and Session data.</li>
+          <li>Watch the status line for the current phase and the session label (site ID and timestamp) being uploaded.</li>
+          <li>Tap any session card in the gallery below to review its details or delete it before upload.</li>
+          <li>If there are no saved sessions, the screen shows a <strong>No pending uploads</strong> card.</li>
+        </ol>
+        <p class="note">If the dial shows <strong>No Network</strong>, move to an area with connectivity and tap again. After sessions finish uploading, the app syncs site metadata automatically; if that sync is pending, the dial shows <strong>Sync Metadata</strong>. On a failed upload, tap <strong>Tap to Retry</strong>.</p>
+        <div class="screens">
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_upload_screen.jpg" alt="Upload queue screen with upload dial and one pending session card">
+            </div>
+            <figcaption>Upload queue with a pending session</figcaption>
+          </figure>
+          <figure>
+            <div class="device">
+              <img src="app_screenshots/app_upload_no_pending_screen.jpg" alt="Upload queue screen showing the No pending uploads card">
+            </div>
+            <figcaption>No pending uploads</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guide-section" id="tips">
+        <h2 class="section-title"><span class="num">7</span>Quick tips</h2>
+        <p class="intro">Use these checks before leaving a site.</p>
+        <div class="quick-grid">
+          <article class="quick-card">
+            <h3>Confirm the site</h3>
+            <p>Make sure the site ID on the home and capture screens is correct before taking photos.</p>
+          </article>
+          <article class="quick-card">
+            <h3>Match the reference</h3>
+            <p>Align the ghost overlay and orientation dial so repeat photos are comparable over time.</p>
+          </article>
+          <article class="quick-card">
+            <h3>Retake unclear photos</h3>
+            <p>Use <strong>Retake</strong> whenever the subject is blurry, blocked, or poorly framed.</p>
+          </article>
+          <article class="quick-card">
+            <h3>Upload when online</h3>
+            <p>Open the upload queue after field work and clear any pending sessions before finishing.</p>
+          </article>
+          <article class="quick-card">
+            <h3>Watch the dial status</h3>
+            <p>If the dial shows <strong>No Network</strong> or <strong>Tap to Retry</strong>, reconnect and tap again to finish.</p>
+          </article>
+          <article class="quick-card">
+            <h3>Keep GPS on</h3>
+            <p>Location access is required for site matching. If prompted, grant permission and enable location services.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+  </div>
+</body>
+</html>
